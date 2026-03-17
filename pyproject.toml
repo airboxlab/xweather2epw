@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "xweather2epw"
+version = "0.1.0"
+description = "A tool that fetches data from the XWeather API and generates EnergyPlus Weather files (EPW)"
+authors = ["Antoine Galataud <antoine@foobot.io>"]
+readme = "README.md"
+homepage = "https://github.com/airboxlab/xweather2epw"
+repository = "https://github.com/airboxlab/xweather2epw"
+keywords = ["weather", "epw", "energyplus", "xweather"]
+packages = [{include = "xweather2epw"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+requests = "^2.31.0"
+click = "^8.1.7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+
+[tool.poetry.scripts]
+xweather2epw = "xweather2epw.cli:main"
+test = "tests.discover:run"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
