@@ -12,6 +12,12 @@ You need to have a XWeather API access. Note that at hourly frequency (which is 
 
 ## Install the package
 
+### PyPi
+
+```
+pip install xweather2epw
+```
+
 ### From source
 
 Clone the current repository and install the required dependencies using [Poetry](https://python-poetry.org/):
