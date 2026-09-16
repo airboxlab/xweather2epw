@@ -63,7 +63,7 @@ This will execute all unit tests with verbose output.
 
 - **Date Range Validation**: Validates input parameters (latitude, longitude, date range)
 - **Smart Chunking**: Automatically splits requests into 15-day chunks to comply with API limits
-- **Date Range Limits**: 
+- **Date Range Limits**:
   - Maximum duration: 1 year (365 days)
   - Forecast limit: Up to 14 days in the future
 - **Missing Data Handling**: Uses safe default values for missing weather data
@@ -83,4 +83,3 @@ This will execute all unit tests with verbose output.
 - [XWeather API Documentation](https://www.xweather.com/docs/weather-api/)
 - [XWeather Conditions Endpoint](https://www.xweather.com/docs/weather-api/endpoints/conditions)
 - [EPW Format Specification](https://designbuilder.co.uk/cahelp/Content/EnergyPlusWeatherFileFormat.htm)
-

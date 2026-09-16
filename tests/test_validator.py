@@ -1,7 +1,9 @@
 """Tests for input validation."""
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
+
 from xweather2epw.validator import validate_inputs
 
 

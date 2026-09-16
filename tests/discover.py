@@ -2,12 +2,12 @@
 
 import os
 import sys
+
 import pytest
 
 
 def run(*, auto_exit=True):
-    """
-    Run the test suite using pytest.
+    """Run the test suite using pytest.
 
     Args:
         auto_exit: Whether to exit with the appropriate exit code after running tests

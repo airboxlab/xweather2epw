@@ -1,7 +1,7 @@
 """Tests for API client."""
 
-import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
+
 from xweather2epw.api_client import XWeatherClient
 
 
