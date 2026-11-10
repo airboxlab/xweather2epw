@@ -1,12 +1,15 @@
 """XWeather API client."""
 
+import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import requests
 
 from xweather2epw.logcfg import init_logging
+from xweather2epw.time_utils import standard_timezone
 
 init_logging()
 
@@ -17,14 +20,18 @@ class XWeatherClient:
     BASE_URL = "https://data.api.xweather.com"
     MAX_DAYS_PER_REQUEST = 15
 
-    def __init__(self, api_key: str, api_secret: str):
+    def __init__(self, api_key: str, api_secret: str, response_log: str | None = None):
         """Initialize XWeather API client.
 
         :param api_key: XWeather API key (client_id)
         :param api_secret: XWeather API secret (client_secret)
+        :param response_log: JSON file for raw responses and credential-free request
+            metadata
         """
         self.api_key = api_key
         self.api_secret = api_secret
+        self.response_log = Path(response_log) if response_log is not None else None
+        self.responses = []
 
     def fetch_conditions(
         self, latitude: float, longitude: float, from_dt: datetime, to_dt: datetime
@@ -35,29 +42,34 @@ class XWeatherClient:
 
         :param latitude: Latitude of location
         :param longitude: Longitude of location
-        :param from_dt: Start datetime
-        :param to_dt: End datetime
+        :param from_dt: Inclusive start date in local standard time
+        :param to_dt: Inclusive end date in local standard time
         :return: dict containing all weather data with metadata
         """
         all_periods = []
         location_info = None
         profile_info = None
+        self.responses = []
+        self._write_response_log()
 
-        # XWeather API treats 'to' date as exclusive, so we adjust it by adding 1 day
-        to_dt += timedelta(days=1)
+        # Public dates are inclusive; API chunks use exclusive end dates.
+        end_exclusive = to_dt + timedelta(days=1)
         # Split date range into chunks
-        chunks = self._split_date_range(from_dt, to_dt)
+        chunks = self._split_date_range(from_dt, end_exclusive)
 
         for chunk_start, chunk_end in chunks:
             chunk_data = self._fetch_chunk(latitude, longitude, chunk_start, chunk_end)
 
-            if chunk_data and "response" in chunk_data:
-                response = chunk_data["response"]
-                if isinstance(response, list) and len(response) > 0:
-                    response = response[0]
+            response = chunk_data.get("response")
+            responses = response if isinstance(response, list) else [response]
+            if not responses:
+                raise ValueError("API response contains no location data.")
 
+            for response in responses:
+                if not isinstance(response, dict):
+                    raise ValueError("API response contains invalid location data.")
                 # Get location info from first chunk
-                if location_info is None and isinstance(response, dict):
+                if location_info is None:
                     if "place" in response:
                         location_info = response["place"]
                     if "profile" in response:
@@ -72,34 +84,82 @@ class XWeatherClient:
                         }
 
                 # Collect periods
-                if "periods" in response:
+                if isinstance(response.get("periods"), list):
                     all_periods.extend(response["periods"])
                 else:
                     raise ValueError("API response missing 'periods' data.")
 
+        if not all_periods:
+            raise ValueError("API response contains no weather periods.")
+
+        zone = standard_timezone(
+            profile_info or {}, datetime.fromisoformat(all_periods[0]["dateTimeISO"])
+        )
+        start = from_dt.replace(tzinfo=zone)
+        end = end_exclusive.replace(tzinfo=zone)
+        # Summer local midnight precedes standard midnight. The exclusive API
+        # end therefore needs one more local day to cover the last standard hour.
+        last_local = (end - timedelta(hours=1)).astimezone(
+            datetime.fromisoformat(all_periods[-1]["dateTimeISO"]).tzinfo
+        )
+        if last_local.replace(tzinfo=None) >= end_exclusive:
+            extra_data = self._fetch_chunk(
+                latitude, longitude, end_exclusive, end_exclusive + timedelta(days=1)
+            )
+            extra_responses = extra_data.get("response")
+            if not isinstance(extra_responses, list):
+                extra_responses = [extra_responses]
+            if not extra_responses:
+                raise ValueError("API response contains no location data.")
+            for response in extra_responses:
+                if not isinstance(response, dict) or not isinstance(response.get("periods"), list):
+                    raise ValueError("API response missing 'periods' data.")
+                all_periods.extend(response["periods"])
+
+        periods_by_time = {}
+        for period in all_periods:
+            dt = datetime.fromisoformat(period["dateTimeISO"])
+            if dt.tzinfo is None:
+                raise ValueError("API dateTimeISO must include a UTC offset.")
+            dt = dt.astimezone(zone)
+            if start <= dt < end:
+                periods_by_time.setdefault(dt, period)
+
+        missing = []
+        current = start
+        while current < end:
+            if current not in periods_by_time:
+                missing.append(current)
+            current += timedelta(hours=1)
+        if missing:
+            dates = ", ".join(sorted({dt.date().isoformat() for dt in missing}))
+            raise ValueError(
+                f"Missing {len(missing)} hourly periods in local standard time on: {dates}"
+            )
+
         return {
             "place": location_info or {},
             "profile": profile_info or {},
-            "periods": all_periods,
+            "periods": [periods_by_time[dt] for dt in sorted(periods_by_time)],
             "loc": {"lat": latitude, "long": longitude},
         }
 
     def _split_date_range(
         self, from_dt: datetime, to_dt: datetime
     ) -> list[tuple[datetime, datetime]]:
-        """Split date range into chunks of max 15 days.
+        """Split a half-open date range into contiguous chunks of max 15 days.
 
         :param from_dt: Start datetime
-        :param to_dt: End datetime
+        :param to_dt: Exclusive end datetime
         :return: List of (start, end) datetime tuples
         """
         chunks = []
         current = from_dt
 
-        while current <= to_dt:
-            chunk_end = min(current + timedelta(days=self.MAX_DAYS_PER_REQUEST - 1), to_dt)
+        while current < to_dt:
+            chunk_end = min(current + timedelta(days=self.MAX_DAYS_PER_REQUEST), to_dt)
             chunks.append((current, chunk_end))
-            current = chunk_end + timedelta(days=1)
+            current = chunk_end
 
         return chunks
 
@@ -135,12 +195,36 @@ class XWeatherClient:
         }
 
         # Make request
-        logging.info(f"Fetching data with params: {params}")
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        response = response.json()
+        logging.info("Fetching conditions for %s from %s to %s", location, from_str, to_str)
+        try:
+            response = requests.get(url, params=params, timeout=30)
+            data = response.json()
+            self.responses.append(
+                {
+                    "request": {
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "from": from_str,
+                        "to": to_str,
+                        "filter": "1hr",
+                    },
+                    "response": data,
+                }
+            )
+            self._write_response_log()
+            response.raise_for_status()
+        except requests.RequestException:
+            # Requests exceptions may contain a URL with credentials.
+            raise ValueError(f"XWeather request failed for {from_str} to {to_str}.") from None
 
-        if response["success"] is False:
-            raise ValueError(f"API error: {response.get('error', 'Unknown error')}")
+        if data["success"] is False:
+            raise ValueError(f"API error: {data.get('error', 'Unknown error')}")
 
-        return response
+        return data
+
+    def _write_response_log(self):
+        """Keep a valid JSON report even if a later request fails."""
+        if self.response_log is not None:
+            with self.response_log.open("w") as f:
+                json.dump(self.responses, f, indent=2)
+                f.write("\n")

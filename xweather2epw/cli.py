@@ -1,6 +1,7 @@
 """Command line interface for xweather2epw."""
 
 import sys
+from pathlib import Path
 
 import click
 
@@ -62,7 +63,13 @@ def cli():
     default=None,
     help="Output EPW file path (default: weather_<lat>_<lon>.epw)",
 )
-def fetch(from_date, to_date, latitude, longitude, api_key, api_secret, output):
+@click.option(
+    "--response-log",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Raw API JSON report path (default: <output stem>.xweather.json)",
+)
+def fetch(from_date, to_date, latitude, longitude, api_key, api_secret, output, response_log):
     """Fetch weather data from XWeather API and generate an EPW file."""
     try:
         # Validate inputs
@@ -71,15 +78,20 @@ def fetch(from_date, to_date, latitude, longitude, api_key, api_secret, output):
         # Set default output filename
         if output is None:
             output = f"weather_{latitude}_{longitude}.epw"
+        if response_log is None:
+            response_log = str(Path(output).with_suffix(".xweather.json"))
+        if Path(response_log).resolve() == Path(output).resolve():
+            raise ValueError("Response log and EPW output must use different paths.")
 
         click.echo(f"Fetching weather data for ({latitude}, {longitude})")
         click.echo(f"Date range: {from_date} to {to_date}")
 
         # Create API client
-        client = XWeatherClient(api_key, api_secret)
+        client = XWeatherClient(api_key, api_secret, response_log=response_log)
 
         # Fetch weather data
         click.echo("Fetching data from XWeather API...")
+        click.echo(f"Saving API responses to {response_log}")
         weather_data = client.fetch_conditions(latitude, longitude, from_dt, to_dt)
 
         if not weather_data:

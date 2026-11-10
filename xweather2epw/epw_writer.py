@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from xweather2epw.logcfg import init_logging
+from xweather2epw.time_utils import standard_timezone
 
 init_logging()
 
@@ -34,6 +35,9 @@ class EPWWriter:
         self.weather_data = weather_data
         self.latitude = latitude
         self.longitude = longitude
+        periods = weather_data.get("periods", [])
+        reference = datetime.fromisoformat(periods[0]["dateTimeISO"]) if periods else None
+        self.timezone = standard_timezone(weather_data.get("profile", {}), reference)
 
     def write(self, output_path: str):
         """Write EPW file.
@@ -70,12 +74,7 @@ class EPWWriter:
         else:
             city_full = city
 
-        # Get timezone offset (default to 0 if not available)
-        tzoffset_sec = profile.get("tzoffset", 0) if profile else 0
-        if isinstance(tzoffset_sec, (int, float)):
-            timezone = tzoffset_sec / 3600  # Convert seconds to hours
-        else:
-            timezone = 0
+        timezone = self.timezone.utcoffset(None).total_seconds() / 3600
 
         # Get elevation (default to 0 if not available)
         elevation = profile.get("elevM", 0) if profile else 0
@@ -106,7 +105,7 @@ class EPWWriter:
     def _write_holidays_header(self, f):
         """Write HOLIDAYS/DAYLIGHT SAVINGS header (empty for this implementation)."""
         periods = self.weather_data.get("periods", [])
-        first_period = periods[0]
+        first_period = periods[0] if periods else {}
         first_date = self._parse_iso_datetime(first_period.get("dateTimeISO", ""))
         is_leap_year = first_date.year % 4 == 0 if first_date else False
         is_leap_year = "Yes" if is_leap_year else "No"
@@ -292,32 +291,22 @@ class EPWWriter:
 
         f.write(record)
 
-    def _parse_iso_datetime(self, iso_string: str) -> datetime:
+    def _parse_iso_datetime(self, iso_string: str) -> datetime | None:
         """Parse ISO datetime string.
 
         Args:
             iso_string: ISO format datetime string
 
         Returns:
-            datetime object or None if parsing fails
+            Local standard datetime, or None for an absent timestamp
         """
         if not iso_string:
             return None
 
         try:
-            # Handle 'Z' timezone indicator (UTC)
-            # Note: We strip timezone info as EPW uses naive timestamps
-            if iso_string.endswith("Z"):
-                iso_string = iso_string[:-1]  # Remove 'Z'
-
-            # Try parsing with timezone info
-            # Format: "2024-02-19T18:00:00-06:00"
-            if "+" in iso_string or iso_string.count("-") > 2:
-                # Has timezone, strip it for simplicity
-                # EPW format uses local time without timezone
-                dt_part = iso_string[:19]  # Get YYYY-MM-DDTHH:MM:SS part
-                return datetime.strptime(dt_part, "%Y-%m-%dT%H:%M:%S")
-            else:
-                return datetime.strptime(iso_string, "%Y-%m-%dT%H:%M:%S")
-        except ValueError:
-            return None
+            dt = datetime.fromisoformat(iso_string)
+        except ValueError as exc:
+            raise ValueError(f"Invalid dateTimeISO: {iso_string!r}") from exc
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(self.timezone)
+        return dt.replace(tzinfo=None)

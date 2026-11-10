@@ -3,6 +3,9 @@
 import os
 import tempfile
 from datetime import datetime
+from io import StringIO
+
+import pytest
 
 from xweather2epw.epw_writer import EPWWriter
 
@@ -125,7 +128,7 @@ def test_epw_writer_missing_data():
 
 def test_parse_iso_datetime():
     """Test ISO datetime parsing."""
-    writer = EPWWriter({}, 0.0, 0.0)
+    writer = EPWWriter({"profile": {"tz": "America/Chicago"}}, 0.0, 0.0)
 
     # Test with timezone
     dt1 = writer._parse_iso_datetime("2024-01-01T12:00:00-06:00")
@@ -137,11 +140,65 @@ def test_parse_iso_datetime():
 
     # Test with Z timezone (UTC)
     dt3 = writer._parse_iso_datetime("2024-01-01T12:00:00Z")
-    assert dt3 == datetime(2024, 1, 1, 12, 0, 0)
+    assert dt3 == datetime(2024, 1, 1, 6, 0, 0)
 
     # Test invalid string
-    dt4 = writer._parse_iso_datetime("invalid")
-    assert dt4 is None
+    with pytest.raises(ValueError, match="Invalid dateTimeISO"):
+        writer._parse_iso_datetime("invalid")
+
+
+@pytest.mark.parametrize(
+    ("timestamps", "hours"),
+    [
+        (
+            [
+                "2026-10-25T01:00:00+02:00",
+                "2026-10-25T02:00:00+02:00",
+                "2026-10-25T02:00:00+01:00",
+                "2026-10-25T03:00:00+01:00",
+            ],
+            ["1", "2", "3", "4"],
+        ),
+        (
+            ["2026-03-29T01:00:00+01:00", "2026-03-29T03:00:00+02:00"],
+            ["2", "3"],
+        ),
+    ],
+)
+def test_dst_uses_fixed_standard_time(timestamps, hours):
+    data = {
+        "profile": {"tz": "Europe/Paris", "tzoffset": 7200, "isDST": True},
+        "periods": [{"dateTimeISO": timestamp} for timestamp in timestamps],
+    }
+    writer = EPWWriter(data, 49.48, 1.11)
+    output = StringIO()
+    writer._write_location_header(output)
+    assert output.getvalue().split(",")[8] == "1.0"
+    output = StringIO()
+    writer._write_weather_data(output)
+    assert [line.split(",")[3] for line in output.getvalue().splitlines()] == hours
+
+
+def test_standard_time_rollover_is_used_in_headers_and_records():
+    writer = EPWWriter(
+        {
+            "profile": {"tz": "Europe/Paris"},
+            "periods": [{"dateTimeISO": "2026-07-01T00:00:00+02:00"}],
+        },
+        49.48,
+        1.11,
+    )
+    output = StringIO()
+    writer._write_data_periods_header(output)
+    writer._write_weather_data(output)
+    lines = output.getvalue().splitlines()
+    assert lines[0].endswith("Tuesday,6/30,6/30")
+    assert lines[1].startswith("2026,6,30,24,0,")
+
+
+def test_dst_profile_without_timezone_is_rejected():
+    with pytest.raises(ValueError, match="IANA timezone"):
+        EPWWriter({"profile": {"tzoffset": 7200, "isDST": True}}, 49.48, 1.11)
 
 
 def test_epw_writer_with_solar_radiation():

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "xweather2epw"
-version = "0.1.0"
+version = "0.2.0"
 description = "A tool that fetches data from the XWeather API and generates EnergyPlus Weather files (EPW)"
 authors = ["Antoine Galataud <antoine@foobot.io>"]
 readme = "README.md"

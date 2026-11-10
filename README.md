@@ -40,6 +40,22 @@ poetry run xweather2epw fetch --from '2025-01-01' --to '2025-12-31' --latitude 4
 poetry run xweather2epw fetch --from '2025-01-01' --to '2025-12-31' --latitude 49.4 --longitude 0.1 --api-key YOUR_KEY --api-secret YOUR_SECRET --output my_weather.epw
 ```
 
+Dates are inclusive and refer to **local standard time**, without daylight-saving
+clock changes. Each period's `dateTimeISO` UTC offset is honored and converted to
+the location's fixed standard offset using the API's IANA timezone (`profile.tz`).
+The LOCATION header uses the same offset. EPW hours remain numbered 1-24, so an
+observation at standard-time 02:00 is written as EPW hour 3. Both autumn DST
+observations are retained as distinct standard-time hours; spring has no clock gap.
+An extra API day may be fetched to cover the last standard-time hour during summer.
+Missing hourly observations cause an explicit error rather than an incomplete EPW.
+
+Every fetch also writes a JSON inspection report beside the EPW, for example
+`my_weather.xweather.json`. It contains each raw API response and its request's
+location, date bounds, and interval, but not the API credentials. The file is updated
+after each response, including API error responses, so earlier responses remain
+available if a later request fails. Override its path with `--response-log responses.json`.
+Do not share API keys or secrets in reports or command output.
+
 Use `--help` to have a list of available options:
 
 ```bash
@@ -63,6 +79,9 @@ This will execute all unit tests with verbose output.
 
 - **Date Range Validation**: Validates input parameters (latitude, longitude, date range)
 - **Smart Chunking**: Automatically splits requests into 15-day chunks to comply with API limits
+- **Contiguous Date Bounds**: Exclusive API chunk ends are reused as the next start, without skipping boundary days
+- **Standard-Time Output**: Converts offset-aware API timestamps to fixed local standard time for EPW
+- **API Inspection Reports**: Saves raw responses to a JSON sidecar file without request credentials
 - **Date Range Limits**:
   - Maximum duration: 1 year (365 days)
   - Forecast limit: Up to 14 days in the future
