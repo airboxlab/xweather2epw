@@ -44,8 +44,10 @@ htmlcov/
 
 # EPW output files (for testing)
 *.epw
+*.xweather.json
 
 # OS
 .DS_Store
 Thumbs.db
 requirements.txt
+node_modules
